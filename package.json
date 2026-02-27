@@ -1,0 +1,14 @@
+{
+  "name": "homelab-ai-assistant",
+  "version": "1.0.0",
+  "description": "Local AI-powered homelab assistant for Docker-based media stacks",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js",
+    "check": "node --check backend/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
