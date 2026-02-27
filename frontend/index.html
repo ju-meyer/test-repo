@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Homelab AI Assistant</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+      .wrap { padding: 1rem; padding-bottom: 230px; }
+      .top-grid { display: flex; gap: 0.8rem; align-items: stretch; }
+      .third-card { width: 33.33vw; max-width: 33.33vw; min-width: 300px; }
+      .card { background: #1e293b; border-radius: 8px; padding: 0.8rem; margin-bottom: 0.8rem; }
+      .chat-dock { position: fixed; left: 0; right: 0; bottom: 0; background: #111827; border-top: 1px solid #334155; padding: 0.8rem 1rem; }
+      .chat-box { max-width: 1200px; margin: 0 auto; }
+      button { background: #2563eb; color: white; border: none; border-radius: 6px; padding: 0.45rem 0.8rem; cursor: pointer; }
+      select, textarea { width: 100%; box-sizing: border-box; background: #0b1220; border: 1px solid #334155; color: #e2e8f0; border-radius: 6px; padding: 0.5rem; }
+      table { width: 100%; border-collapse: collapse; margin-top: 0.45rem; font-size: 0.86rem; }
+      th, td { border-bottom: 1px solid #334155; padding: 0.35rem; text-align: left; vertical-align: top; }
+      .Healthy { color: #22c55e; font-weight: bold; }
+      .Warning { color: #f59e0b; font-weight: bold; }
+      .Critical { color: #ef4444; font-weight: bold; }
+      pre { white-space: pre-wrap; font-size: 0.8rem; max-height: 260px; overflow-y: auto; background: #020617; padding: 0.6rem; border-radius: 6px; }
+      .muted { color: #94a3b8; font-size: 0.86rem; }
+      .metric { display: flex; justify-content: space-between; margin: 0.35rem 0; padding: 0.4rem; background: #0b1220; border-radius: 6px; }
+      @media (max-width: 1100px) {
+        .top-grid { flex-direction: column; }
+        .third-card { width: 100%; max-width: none; min-width: 0; }
+      }
+    </style>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useEffect, useState } = React;
+
+      function App() {
+        const [containers, setContainers] = useState([]);
+        const [health, setHealth] = useState([]);
+        const [query, setQuery] = useState('Why did Radarr fail to import?');
+        const [diagnostic, setDiagnostic] = useState(null);
+        const [busy, setBusy] = useState(false);
+        const [selectedContainer, setSelectedContainer] = useState('');
+        const [logs, setLogs] = useState('');
+        const [executionMessage, setExecutionMessage] = useState('');
+        const [systemMonitor, setSystemMonitor] = useState(null);
+        const [torrents, setTorrents] = useState([]);
+        const [torrentError, setTorrentError] = useState('');
+
+        async function loadContainers() {
+          const response = await fetch('/api/containers');
+          const data = await response.json();
+          setContainers(data.containers || []);
+          if (!selectedContainer && data.containers?.length) {
+            setSelectedContainer(data.containers[0].name);
+          }
+        }
+
+        async function loadHealth() {
+          const response = await fetch('/api/health');
+          const data = await response.json();
+          setHealth(data.results || []);
+        }
+
+        async function loadSystemMonitor() {
+          const response = await fetch('/api/system-monitor');
+          const data = await response.json();
+          setSystemMonitor(data);
+        }
+
+
+        async function loadTorrents() {
+          try {
+            setTorrentError('');
+            const response = await fetch('/api/qbittorrent/torrents');
+            const data = await response.json();
+            if (!response.ok) {
+              throw new Error(data.error || 'Failed to load torrents.');
+            }
+            setTorrents(data.torrents || []);
+          } catch (error) {
+            setTorrentError(error.message);
+          }
+        }
+
+        async function runDiagnosis() {
+          setBusy(true);
+          try {
+            const response = await fetch('/api/diagnose', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query })
+            });
+            const data = await response.json();
+            setDiagnostic(data);
+          } finally {
+            setBusy(false);
+          }
+        }
+
+        async function loadLogs() {
+          if (!selectedContainer) return;
+          const response = await fetch(`/api/logs/${selectedContainer}?tail=200`);
+          const data = await response.json();
+          setLogs(data.logs || 'No logs available.');
+        }
+
+        async function restartUnhealthy() {
+          const unhealthy = health.filter((h) => h.health.level !== 'Healthy');
+          if (!unhealthy.length) {
+            setExecutionMessage('No unhealthy containers detected.');
+            return;
+          }
+
+          const confirmed = window.confirm(
+            `About to restart ${unhealthy.length} container(s): ${unhealthy.map((h) => h.container).join(', ')}. Continue?`
+          );
+
+          if (!confirmed) {
+            setExecutionMessage('Restart canceled by user.');
+            return;
+          }
+
+          const results = [];
+          for (const entry of unhealthy) {
+            const response = await fetch('/api/execute', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'restart_container', containerName: entry.container, confirmed: true })
+            });
+            const data = await response.json();
+            results.push(data.message || data.error);
+          }
+
+          setExecutionMessage(results.join('\n'));
+          await loadHealth();
+        }
+
+        function formatGiBFromBytes(bytes) {
+          return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GiB`;
+        }
+
+        useEffect(() => {
+          loadContainers();
+          loadHealth();
+          loadSystemMonitor();
+          loadTorrents();
+        }, []);
+
+        return (
+          <div className="wrap">
+            <h1>Homelab AI Assistant</h1>
+            <p className="muted">Top view resized to 3 equal sections (Health, Logs, System Monitor). Chat is docked at the bottom.</p>
+
+            <div className="top-grid">
+              <div className="card third-card">
+                <h3>Container Health</h3>
+                <button onClick={loadHealth}>Refresh</button>
+                <button style={{ marginLeft: '0.4rem', background: '#b91c1c' }} onClick={restartUnhealthy}>Restart Unhealthy</button>
+                <table>
+                  <thead>
+                    <tr><th>Name</th><th>Score</th><th>Level</th></tr>
+                  </thead>
+                  <tbody>
+                    {health.map((item) => (
+                      <tr key={item.container}>
+                        <td>{item.container}</td>
+                        <td>{item.health.score}</td>
+                        <td className={item.health.level}>{item.health.level}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {executionMessage && <pre>{executionMessage}</pre>}
+              </div>
+
+              <div className="card third-card">
+                <h3>Container Logs</h3>
+                <select value={selectedContainer} onChange={(e) => setSelectedContainer(e.target.value)}>
+                  {containers.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+                <button style={{ marginTop: '0.4rem' }} onClick={loadLogs}>Load Logs</button>
+                <pre>{logs || 'Select a container and load logs.'}</pre>
+              </div>
+
+              <div className="card third-card">
+                <h3>System Monitor</h3>
+                <button onClick={loadSystemMonitor}>Refresh Monitor</button>
+                {!systemMonitor && <p className="muted">Loading system stats...</p>}
+                {systemMonitor && (
+                  <div>
+                    <div className="metric"><span>CPU Utilization</span><strong>{systemMonitor.cpu?.utilizationPercent ?? 'n/a'}%</strong></div>
+                    <div className="metric"><span>RAM Utilization</span><strong>{systemMonitor.memory?.utilizationPercent ?? 'n/a'}%</strong></div>
+                    <div className="metric"><span>RAM Used</span><strong>{systemMonitor.memory ? formatGiBFromBytes(systemMonitor.memory.usedBytes) : 'n/a'}</strong></div>
+                    <div className="metric"><span>RAM Total</span><strong>{systemMonitor.memory ? formatGiBFromBytes(systemMonitor.memory.totalBytes) : 'n/a'}</strong></div>
+                    <div className="metric"><span>/media Storage Utilization</span><strong>{systemMonitor.storage?.utilizationPercent ?? 'n/a'}%</strong></div>
+                    {systemMonitor.storage?.error && <pre>{systemMonitor.storage.error}</pre>}
+                    <p className="muted">Last refresh: {systemMonitor.timestamp || 'n/a'}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="card" style={{ marginTop: '0.8rem' }}>
+              <h3>qBittorrent Torrents</h3>
+              <button onClick={loadTorrents}>Refresh Torrents</button>
+              {torrentError && <pre>{torrentError}</pre>}
+              {!torrentError && (
+                <table>
+                  <thead>
+                    <tr><th>Name</th><th>Status</th><th>Progress</th><th>DL</th><th>UP</th><th>ETA(s)</th></tr>
+                  </thead>
+                  <tbody>
+                    {torrents.map((torrent) => (
+                      <tr key={torrent.name}>
+                        <td>{torrent.name}</td>
+                        <td>{torrent.state}</td>
+                        <td>{torrent.progressPercent}%</td>
+                        <td>{torrent.downloadSpeed}</td>
+                        <td>{torrent.uploadSpeed}</td>
+                        <td>{torrent.etaSeconds}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {!torrentError && torrents.length === 0 && <p className="muted">No torrents returned.</p>}
+            </div>
+
+            {diagnostic && (
+              <div className="card" style={{ marginTop: '0.8rem' }}>
+                <h3>Diagnostic Output</h3>
+                <pre>{JSON.stringify(diagnostic, null, 2)}</pre>
+              </div>
+            )}
+
+            <div className="chat-dock">
+              <div className="chat-box">
+                <h3 style={{ marginTop: 0 }}>Chat Diagnostics</h3>
+                <textarea rows="3" value={query} onChange={(e) => setQuery(e.target.value)} />
+                <div style={{ marginTop: '0.5rem' }}>
+                  <button onClick={runDiagnosis} disabled={busy}>{busy ? 'Running...' : 'Run Diagnostics'}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+  </body>
+</html>
