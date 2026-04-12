@@ -1,52 +1,37 @@
-# Homelab AI Assistant (MVP)
+# AlgoQuest: Sort & Search Academy (MVP)
 
-A local-first AI-powered assistant for Docker-based homelab stacks.
+AlgoQuest is a browser-based educational game that teaches sorting and searching algorithms through visual gameplay and C++-focused coding challenges.
 
-## Stack
-- Backend: Node.js + Express
-- Frontend: React dashboard (served as static HTML)
-- Docker access: Docker CLI (with Docker socket available at `/var/run/docker.sock`)
+## What this MVP includes
+- A playable browser game loop with level progression.
+- Real-time visual feedback on arrays (bars/cards) during comparisons and swaps.
+- Early concept levels (no full coding required).
+- Mid-tier challenge levels for prediction/debugging/fill-in style tasks.
+- A first C++ challenge evaluator for scaffolded coding missions.
+- Hints, stars, score, and world unlock progression.
 
-## Features (MVP)
-- List all Docker containers.
-- Read container logs.
-- Summarize logs (ERROR, WARN, stack traces).
-- Compute per-container health score:
-  - Healthy
-  - Warning
-  - Critical
-- Natural language diagnostics mapping for prompts such as:
-  - "Why did Radarr fail to import?"
-  - "Is my VPN working?"
-  - "Restart unhealthy containers."
-  - "Why are downloads stalled?"
-- Safe command execution policy:
-  - Read-only diagnostics are encouraged.
-  - Restart actions require explicit confirmation.
-  - No destructive actions are implemented.
-
-## Run
+## Quick start
 ```bash
 npm install
 npm start
 ```
 
-Then open: `http://localhost:3000`
+Open: `http://localhost:3000`
 
-## API Endpoints
-- `GET /api/containers`
-- `GET /api/logs/:containerName?tail=200`
-- `GET /api/log-summary/:containerName?tail=200`
-- `GET /api/health`
-- `GET /api/system-monitor` (CPU, RAM, and `/media` storage utilization)
-- `GET /api/qbittorrent/torrents` (current torrent name, state, progress, and transfer stats)
-- `POST /api/diagnose` with JSON body: `{ "query": "Is my VPN working?" }`
-- `POST /api/execute` with JSON body:
-  `{ "action": "restart_container", "containerName": "radarr", "confirmed": true }`
-- `GET /api/safety`
+## Scripts
+- `npm start` — start local server
+- `npm run dev` — same as start
+- `npm run check` — syntax check backend JS
 
+## High-level architecture
+- `frontend/` — game UI, rendering, level engine, and interaction loop.
+- `backend/` — Express server, static file hosting, level metadata API, and simple C++ challenge grading stub.
+- `docs/` — MVP product requirements, progression plan, and phased roadmap.
 
-## Optional qBittorrent API env vars
-- `QBITTORRENT_URL` (default: `http://127.0.0.1:8080`)
-- `QBITTORRENT_USERNAME`
-- `QBITTORRENT_PASSWORD`
+## Notes on C++ execution for MVP
+This MVP uses **structured challenge validation** (pattern checks + test-case style checks) rather than true native C++ execution.
+
+Future-ready options are documented in `docs/MVP_PRD.md`:
+1. WebAssembly C++ toolchain in-browser
+2. Sandboxed remote compile/run service
+3. Hybrid mode (local validation + remote verification)
