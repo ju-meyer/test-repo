@@ -1,18 +1,15 @@
-const STORAGE_KEY = 'algoquest-progress-v2';
+const STORAGE_KEY = 'algoquest-progress-v1';
 const levels = window.ALGOQUEST_LEVELS || [];
 
 const state = {
   selectedWorld: 1,
   selectedLevelId: null,
   selectedIndices: [],
-  selectedChoice: '',
   hintIndex: 0,
   score: 0,
   stars: 0,
   completed: {},
-  rank: 'Novice',
-  currentArray: [],
-  swapCount: 0
+  rank: 'Novice'
 };
 
 const el = {
@@ -32,14 +29,6 @@ const el = {
   stars: document.getElementById('stars'),
   rank: document.getElementById('rank')
 };
-
-function normalizeCsv(value) {
-  return String(value || '')
-    .split(',')
-    .map((v) => v.trim())
-    .filter(Boolean)
-    .join(',');
-}
 
 function saveProgress() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -63,10 +52,9 @@ function loadProgress() {
 }
 
 function deriveRank() {
-  if (state.stars >= 30) return 'Algorithm Master';
-  if (state.stars >= 22) return 'Algorithm Ranger';
-  if (state.stars >= 14) return 'Code Scout';
-  if (state.stars >= 6) return 'Array Apprentice';
+  if (state.stars >= 10) return 'Algorithm Ranger';
+  if (state.stars >= 6) return 'Code Scout';
+  if (state.stars >= 3) return 'Array Apprentice';
   return 'Novice';
 }
 
@@ -79,16 +67,15 @@ function renderStats() {
 
 function worldUnlocked(world) {
   if (world === 1) return true;
-  const previousWorld = world - 1;
-  const previousLevels = levels.filter((l) => l.world === previousWorld);
-  const earned = previousLevels.reduce((sum, level) => sum + (state.completed[level.id]?.stars || 0), 0);
-  return earned >= Math.max(6, previousLevels.length * 2);
+  const prevWorldStars = Object.entries(state.completed)
+    .filter(([id]) => levels.find((l) => l.id === id)?.world === world - 1)
+    .reduce((sum, [, data]) => sum + (data.stars || 0), 0);
+  return prevWorldStars >= 2;
 }
 
 function renderWorlds() {
   const worlds = [...new Set(levels.map((l) => l.world))];
   el.worlds.innerHTML = '';
-
   worlds.forEach((world) => {
     const unlocked = worldUnlocked(world);
     const button = document.createElement('button');
@@ -106,7 +93,6 @@ function renderWorlds() {
 function renderLevels() {
   const worldLevels = levels.filter((l) => l.world === state.selectedWorld);
   el.levels.innerHTML = '';
-
   worldLevels.forEach((level, idx) => {
     const prev = worldLevels[idx - 1];
     const unlocked = idx === 0 || Boolean(state.completed[prev.id]);
@@ -114,7 +100,7 @@ function renderLevels() {
     const stars = state.completed[level.id]?.stars || 0;
     button.className = `level-btn ${unlocked ? '' : 'locked'}`;
     button.textContent = unlocked
-      ? `${level.title} ${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}`
+      ? `${level.title} ${'★'.repeat(stars)}`
       : `${level.title} 🔒`;
     button.disabled = !unlocked;
     button.onclick = () => loadLevel(level.id);
@@ -128,18 +114,15 @@ function getCurrentLevel() {
 
 function renderArrayBars(arr, highlight = []) {
   el.arrayArea.innerHTML = '';
-  if (!arr || arr.length === 0) {
-    el.arrayArea.innerHTML = '<p class="muted">This level is concept/code focused and does not use bar visualization.</p>';
-    return;
-  }
-
   const max = Math.max(...arr, 1);
   arr.forEach((value, idx) => {
     const bar = document.createElement('button');
     bar.className = 'bar';
     bar.style.height = `${30 + (value / max) * 110}px`;
     bar.textContent = `${value}`;
-    if (highlight.includes(idx)) bar.classList.add('active');
+    if (highlight.includes(idx)) {
+      bar.classList.add('active');
+    }
     bar.onclick = () => handleBarClick(idx);
     el.arrayArea.appendChild(bar);
   });
@@ -148,44 +131,36 @@ function renderArrayBars(arr, highlight = []) {
 function renderPrompt(level) {
   el.promptArea.innerHTML = '';
 
-  const lesson = document.createElement('p');
-  lesson.className = 'muted';
-  lesson.textContent = `Learn: ${level.lesson}`;
-  el.promptArea.appendChild(lesson);
-
-  if (level.type === 'mcq') {
-    level.choices.forEach((choice) => {
-      const row = document.createElement('div');
-      const input = document.createElement('input');
-      input.type = 'radio';
-      input.name = 'mcq';
-      input.value = choice.value;
-      input.onchange = () => {
-        state.selectedChoice = choice.value;
+  if (level.type === 'predict') {
+    const { left, right } = level.question;
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = `
+      <p>Choose the larger index:</p>
+      <button data-ans="${left}">Index ${left}</button>
+      <button data-ans="${right}">Index ${right}</button>
+    `;
+    wrapper.querySelectorAll('button').forEach((btn) => {
+      btn.onclick = () => {
+        state.selectedIndices = [Number(btn.dataset.ans)];
+        renderArrayBars(level.array, [left, right, Number(btn.dataset.ans)]);
       };
-      const label = document.createElement('label');
-      label.style.marginLeft = '0.5rem';
-      label.textContent = choice.label;
-      row.appendChild(input);
-      row.appendChild(label);
-      el.promptArea.appendChild(row);
     });
+    el.promptArea.appendChild(wrapper);
   }
 
-  if (level.type === 'index-answer') {
+  if (level.type === 'search') {
     const input = document.createElement('input');
     input.type = 'number';
-    input.id = 'index-answer';
-    input.placeholder = 'Enter index answer';
+    input.placeholder = 'Enter found index';
+    input.id = 'answer-index';
     el.promptArea.appendChild(input);
   }
 
-  if (level.type === 'text-answer') {
+  if (level.type === 'binary-choice') {
     const input = document.createElement('input');
-    input.type = 'text';
-    input.id = 'text-answer';
-    input.placeholder = 'e.g. 1,3,2,4';
-    input.style.width = '100%';
+    input.type = 'number';
+    input.placeholder = 'Enter first mid index';
+    input.id = 'answer-mid';
     el.promptArea.appendChild(input);
   }
 
@@ -195,57 +170,36 @@ function renderPrompt(level) {
     textarea.value = level.starterCode;
     el.promptArea.appendChild(textarea);
   }
-
-  if (level.type === 'swap-target') {
-    const info = document.createElement('p');
-    info.className = 'muted';
-    info.textContent = 'Select exactly two bars to perform one swap. Then click Run / Check.';
-    el.promptArea.appendChild(info);
-  }
 }
 
 function loadLevel(levelId) {
   state.selectedLevelId = levelId;
   state.selectedIndices = [];
-  state.selectedChoice = '';
   state.hintIndex = 0;
-  state.swapCount = 0;
 
   const level = getCurrentLevel();
-  state.currentArray = [...(level.array || [])];
-
   el.levelTitle.textContent = `${level.title} (World ${level.world})`;
   el.levelConcept.textContent = `Concept: ${level.concept}`;
   el.levelMission.textContent = `Mission: ${level.mission}`;
 
-  renderArrayBars(state.currentArray);
+  renderArrayBars(level.array || []);
   renderPrompt(level);
-  el.feedback.textContent = 'Mission loaded. Work through the concept, then click Run / Check.';
-}
-
-function computeStars(level, passed, hintUsed) {
-  if (!passed) return 0;
-
-  let stars = hintUsed ? 2 : 3;
-  if (level.type === 'swap-target' && level.maxSwapsForBonus && state.swapCount > level.maxSwapsForBonus) {
-    stars = Math.max(1, stars - 1);
-  }
-  return stars;
+  el.feedback.textContent = 'Mission loaded. Complete the objective and click Run / Check.';
 }
 
 function markCompletion(level, passed, hintUsed) {
   if (!passed) return;
 
-  const stars = computeStars(level, passed, hintUsed);
-  const points = 80 + stars * 20;
-  const previous = state.completed[level.id];
+  const already = state.completed[level.id];
+  const stars = hintUsed ? 2 : 3;
+  const points = hintUsed ? 80 : 120;
 
-  if (!previous) {
-    state.completed[level.id] = { stars };
+  if (!already) {
     state.score += points;
     state.stars += stars;
-  } else if (stars > previous.stars) {
-    state.stars += stars - previous.stars;
+    state.completed[level.id] = { stars };
+  } else if (stars > already.stars) {
+    state.stars += (stars - already.stars);
     state.completed[level.id].stars = stars;
   }
 
@@ -259,99 +213,99 @@ function isHintUsed() {
   return state.hintIndex > 0;
 }
 
-async function evaluateCodeChallenge(level, code) {
-  const response = await fetch('/api/evaluate-cpp', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ challengeId: level.challengeId, code })
-  });
-
-  const result = await response.json();
-  return {
-    passed: Boolean(result.passed),
-    message: result.passed
-      ? 'Code challenge passed. Great algorithm logic!'
-      : `Missing: ${(result.checks?.missing || []).join(', ') || 'none'} | Forbidden: ${(result.checks?.forbiddenFound || []).join(', ') || 'none'}`
-  };
-}
-
 async function runCheck() {
   const level = getCurrentLevel();
   if (!level) return;
 
   let passed = false;
-  let message = 'Not checked.';
+  let msg = '';
 
-  if (level.type === 'mcq') {
-    passed = state.selectedChoice === level.answer;
-    message = passed ? 'Correct decision.' : 'Not quite. Re-read the lesson line.';
+  if (level.type === 'predict') {
+    passed = state.selectedIndices[0] === level.question.answer;
+    msg = passed
+      ? 'Correct! You identified the larger value.'
+      : 'Not yet. Pick the index with the larger value.';
   }
 
-  if (level.type === 'index-answer') {
-    const value = Number(document.getElementById('index-answer')?.value);
+  if (level.type === 'swap') {
+    const arr = [...level.array];
+    const [a, b] = state.selectedIndices;
+    if (a === undefined || b === undefined) {
+      msg = 'Select exactly two bars to swap.';
+    } else {
+      [arr[a], arr[b]] = [arr[b], arr[a]];
+      passed = arr.join(',') === level.target.join(',');
+      renderArrayBars(arr, [a, b]);
+      msg = passed ? 'Nice swap! Array is now sorted.' : 'After swap, array is not sorted yet.';
+    }
+  }
+
+  if (level.type === 'search') {
+    const value = Number(document.getElementById('answer-index')?.value);
     passed = value === level.expectedIndex;
-    message = passed ? 'Correct index.' : `Expected index logic mismatch.`;
-    if (passed && level.array) renderArrayBars(level.array, [value]);
+    msg = passed
+      ? 'Linear search success: correct index.'
+      : 'Incorrect index. Think left-to-right scan.';
+    if (passed) {
+      renderArrayBars(level.array, [level.expectedIndex]);
+    }
   }
 
-  if (level.type === 'text-answer') {
-    const value = normalizeCsv(document.getElementById('text-answer')?.value);
-    passed = value === normalizeCsv(level.expectedText);
-    message = passed ? 'Correct trace/result.' : `Expected format like: ${level.expectedText}`;
-  }
-
-  if (level.type === 'swap-target') {
-    passed = normalizeCsv(state.currentArray) === normalizeCsv(level.target);
-    message = passed
-      ? `Sorted achieved in ${state.swapCount} swap(s).`
-      : 'Array is not at target order yet. Continue swapping then Run / Check.';
+  if (level.type === 'binary-choice') {
+    const value = Number(document.getElementById('answer-mid')?.value);
+    passed = value === level.expectedMid;
+    msg = passed
+      ? 'Correct midpoint! Binary search begins there.'
+      : 'Try midpoint formula with low=0 and high=n-1.';
+    if (passed) renderArrayBars(level.array, [value]);
   }
 
   if (level.type === 'code') {
     const code = document.getElementById('cpp-code')?.value || '';
     try {
-      const result = await evaluateCodeChallenge(level, code);
-      passed = result.passed;
-      message = result.message;
+      const response = await fetch('/api/evaluate-cpp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challengeId: level.id, code })
+      });
+      const result = await response.json();
+      passed = Boolean(result.passed);
+      msg = passed
+        ? 'Great fix. Loop now checks all elements.'
+        : `Validation failed: missing [${(result.checks?.missing || []).join(', ')}], forbidden [${(result.checks?.forbiddenFound || []).join(', ')}].`;
     } catch {
-      passed = false;
-      message = 'Code evaluation service unavailable. Try again.';
+      const requiredOk = level.validator.requiredSubstrings.every((s) => code.includes(s));
+      const forbiddenOk = level.validator.forbiddenSubstrings.every((s) => !code.includes(s));
+      passed = requiredOk && forbiddenOk;
+      msg = passed
+        ? 'Great fix. Loop now checks all elements. (local fallback)'
+        : 'Validation failed: check loop boundary and required logic.';
     }
   }
 
-  el.feedback.textContent = message;
+  el.feedback.textContent = msg;
   markCompletion(level, passed, isHintUsed());
 }
 
-function handleBarClick(index) {
+function handleBarClick(idx) {
   const level = getCurrentLevel();
-  if (!level || level.type !== 'swap-target') return;
+  if (!level || level.type !== 'swap') return;
 
-  if (state.selectedIndices.includes(index)) {
-    state.selectedIndices = state.selectedIndices.filter((i) => i !== index);
+  if (state.selectedIndices.includes(idx)) {
+    state.selectedIndices = state.selectedIndices.filter((i) => i !== idx);
   } else if (state.selectedIndices.length < 2) {
-    state.selectedIndices.push(index);
+    state.selectedIndices.push(idx);
   } else {
-    state.selectedIndices = [state.selectedIndices[1], index];
+    state.selectedIndices = [state.selectedIndices[1], idx];
   }
 
-  if (state.selectedIndices.length === 2) {
-    const [a, b] = state.selectedIndices;
-    [state.currentArray[a], state.currentArray[b]] = [state.currentArray[b], state.currentArray[a]];
-    state.swapCount += 1;
-    state.selectedIndices = [];
-    renderArrayBars(state.currentArray, [a, b]);
-    el.feedback.textContent = `Swap performed. Total swaps: ${state.swapCount}`;
-    return;
-  }
-
-  renderArrayBars(state.currentArray, state.selectedIndices);
+  renderArrayBars(level.array, state.selectedIndices);
 }
 
 function showHint() {
   const level = getCurrentLevel();
   if (!level) return;
-  const hint = level.hints[Math.min(state.hintIndex, level.hints.length - 1)] || 'No hint available.';
+  const hint = level.hints[Math.min(state.hintIndex, level.hints.length - 1)];
   state.hintIndex += 1;
   el.feedback.textContent = `Hint ${Math.min(state.hintIndex, level.hints.length)}: ${hint}`;
 }
@@ -366,19 +320,11 @@ function nextLevel() {
   if (!current) return;
   const worldLevels = levels.filter((l) => l.world === current.world);
   const idx = worldLevels.findIndex((l) => l.id === current.id);
-
-  if (worldLevels[idx + 1]) {
-    loadLevel(worldLevels[idx + 1].id);
-    return;
-  }
-
-  const nextWorldFirst = levels.find((l) => l.world === current.world + 1);
-  if (nextWorldFirst && worldUnlocked(nextWorldFirst.world)) {
-    state.selectedWorld = nextWorldFirst.world;
-    renderLevels();
-    loadLevel(nextWorldFirst.id);
+  const next = worldLevels[idx + 1];
+  if (next) {
+    loadLevel(next.id);
   } else {
-    el.feedback.textContent = 'World complete. Earn more stars to unlock the next world.';
+    el.feedback.textContent = 'World complete! Unlock the next world with earned stars.';
   }
 }
 
